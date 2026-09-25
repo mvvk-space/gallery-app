@@ -1,7 +1,386 @@
 <!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>Coming soon</title></head>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Gallery Designer</title>
+<style>
+    :root {
+        /* Default Theme (Dark Mode) */
+        --bg-color: #0f0f11;
+        --item-bg: #1a1a1d;
+        --text-color: #ffffff;
+        --accent-color: #3b82f6; 
+        --overlay-color: rgba(0, 0, 0, 0.95);
+        
+        /* Dynamic Dimensions */
+        --gap: 16px;
+        --radius: 8px;
+        --col-width: 350px; /* New variable for Flex sizing consistency */
+    }
+
+    body {
+        margin: 0;
+        padding: 20px;
+        background-color: var(--bg-color);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: var(--text-color);
+        min-height: 100vh;
+        transition: background-color 0.3s, color 0.3s;
+    }
+
+    /* --- 1. HYBRID GALLERY LAYOUT ENGINE --- */
+    
+    .gallery-container {
+        max-width: 1600px;
+        margin: 0 auto;
+        transition: all 0.3s ease;
+    }
+
+    /* MODE A: Masonry (For 8+ items) */
+    .gallery-container.mode-masonry {
+        column-count: 4;
+        column-gap: var(--gap);
+        display: block;
+    }
+    
+    .gallery-container.mode-masonry .gallery-item {
+        margin-bottom: var(--gap); /* Masonry needs margin, not gap */
+        width: 100%;
+    }
+
+    /* MODE B: Centered Flex (For < 8 items) */
+    .gallery-container.mode-centered {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center; /* The magic centering sauce */
+        gap: var(--gap);
+        align-items: flex-start;
+        min-height: 60vh; /* Centers vertically visually if list is short */
+        align-content: center;
+    }
+
+    .gallery-container.mode-centered .gallery-item {
+        /* Make items look like grid items but flexible */
+        width: var(--col-width);
+        max-width: 100%; 
+        flex-grow: 1; /* Allow them to expand slightly to fill rows */
+        flex-basis: var(--col-width);
+        margin-bottom: 0; /* Flex gap handles spacing here */
+    }
+
+    /* Shared Item Styles */
+    .gallery-item {
+        break-inside: avoid;
+        cursor: zoom-in;
+        border-radius: var(--radius);
+        overflow: hidden;
+        background: var(--item-bg);
+        transition: border-radius 0.3s, transform 0.2s;
+        position: relative;
+    }
+
+    .gallery-item img {
+        width: 100%;
+        height: auto;
+        display: block;
+        transition: transform 0.3s ease;
+    }
+
+    .gallery-item:hover { transform: translateY(-4px); }
+    .gallery-item:hover img { transform: scale(1.03); }
+
+    /* Responsive adjustments */
+    @media (max-width: 1024px) { 
+        .gallery-container.mode-masonry { column-count: 3; } 
+    }
+    @media (max-width: 768px)  { 
+        .gallery-container.mode-masonry { column-count: 2; } 
+    }
+    @media (max-width: 480px)  { 
+        .gallery-container.mode-masonry { column-count: 1; } 
+        .gallery-container.mode-centered { display: block; } /* Fallback to stack on mobile */
+        .gallery-item { margin-bottom: var(--gap) !important; width: 100% !important; }
+    }
+
+    /* --- 2. Setup Overlay --- */
+    .setup-overlay {
+        position: fixed; inset: 0; background: rgba(15, 15, 17, 0.8);
+        backdrop-filter: blur(15px); z-index: 2000;
+        display: flex; justify-content: center; align-items: center;
+        transition: opacity 0.5s ease;
+    }
+    .setup-box {
+        background: #1e1e24; padding: 40px; border-radius: 12px;
+        width: 90%; max-width: 500px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        text-align: center; border: 1px solid #333; color: white;
+    }
+    textarea {
+        width: 100%; height: 120px; background: #0f0f11; border: 1px solid #333;
+        color: #ddd; padding: 15px; border-radius: 6px; resize: vertical; margin-bottom: 20px;
+    }
+    .btn {
+        background: var(--accent-color); color: white; border: none; padding: 12px 30px;
+        border-radius: 6px; font-size: 1rem; cursor: pointer; transition: transform 0.1s;
+    }
+    .btn:active { transform: scale(0.98); }
+
+    /* --- 3. Lightbox --- */
+    .lightbox {
+        position: fixed; inset: 0; background: var(--overlay-color);
+        display: flex; justify-content: center; align-items: center;
+        opacity: 0; pointer-events: none; transition: opacity 0.2s ease; z-index: 3000;
+    }
+    .lightbox.active { opacity: 1; pointer-events: all; }
+    .lightbox img {
+        max-height: 90vh; max-width: 90vw;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        border-radius: 4px; user-select: none;
+    }
+    .nav-zone { position: absolute; top: 0; bottom: 0; width: 50%; z-index: 3001; cursor: pointer; }
+    .nav-prev { left: 0; }
+    .nav-next { right: 0; }
+    .close-btn { position: absolute; top: 20px; right: 30px; font-size: 40px; color: white; cursor: pointer; z-index: 3002; }
+
+    /* --- 4. Settings Panel --- */
+    .settings-toggle {
+        position: fixed; bottom: 30px; right: 30px;
+        width: 50px; height: 50px; border-radius: 50%;
+        background: var(--accent-color); color: white; border: none;
+        box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+        cursor: pointer; z-index: 1000; font-size: 24px;
+        display: none; transition: transform 0.2s;
+    }
+    .settings-toggle:hover { transform: rotate(90deg); }
+
+    .settings-panel {
+        position: fixed; bottom: 90px; right: 30px;
+        width: 280px; background: rgba(30, 30, 36, 0.95);
+        backdrop-filter: blur(10px); padding: 20px; border-radius: 12px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1);
+        color: white; z-index: 1000; display: none; transform-origin: bottom right;
+        animation: popIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    @keyframes popIn { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+    .control-group { margin-bottom: 15px; }
+    .control-group label { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 5px; color: #aaa; }
+    input[type=range] { width: 100%; cursor: pointer; accent-color: var(--accent-color); }
+
+    .action-row { display: flex; gap: 10px; margin-top: 20px; }
+    .action-btn {
+        flex: 1; padding: 8px; border: 1px solid rgba(255,255,255,0.2);
+        background: rgba(255,255,255,0.1); color: white; border-radius: 6px;
+        cursor: pointer; font-size: 0.85rem; transition: background 0.2s;
+    }
+    .action-btn:hover { background: rgba(255,255,255,0.2); }
+    .dice-btn { background: var(--accent-color); border: none; }
+</style>
+</head>
 <body>
-<h1>This page does not have an index.html set up yet!</h1>
+
+    <div class="setup-overlay" id="setupOverlay">
+        <div class="setup-box">
+            <h2>Gallery Setup</h2>
+            <p>Paste filenames (e.g. <em>photo1.jpg, photo2.png</em>)</p>
+            <textarea id="fileInput" placeholder="img1.jpg&#10;img2.jpg"></textarea>
+            <button class="btn" id="generateBtn">Create Gallery</button>
+        </div>
+    </div>
+
+    <div class="gallery-container" id="gallery">
+        </div>
+
+    <button class="settings-toggle" id="toggleSettings">⚙️</button>
+    
+    <div class="settings-panel" id="settingsPanel">
+        <div class="control-group">
+            <label>Spacing <span><span id="gapVal">16</span>px</span></label>
+            <input type="range" min="0" max="60" value="16" id="gapRange">
+        </div>
+        
+        <div class="control-group">
+            <label>Corner Radius <span><span id="radVal">8</span>px</span></label>
+            <input type="range" min="0" max="40" value="8" id="radRange">
+        </div>
+
+        <div class="action-row">
+            <button class="action-btn" id="cycleThemeBtn">🎨 Theme</button>
+            <button class="action-btn dice-btn" id="randomizeBtn">🎲 Roll</button>
+        </div>
+    </div>
+
+    <div class="lightbox" id="lightbox">
+        <div class="close-btn">&times;</div>
+        <div class="nav-zone nav-prev" id="prevZone"></div>
+        <div class="nav-zone nav-next" id="nextZone"></div>
+        <img src="" alt="" id="lightbox-img">
+    </div>
+
+<script>
+    /* --- 1. DATA & STATE --- */
+    let images = [];
+    let currentIndex = 0;
+    let themeIndex = 0;
+
+    // Color Palettes
+    const themes = [
+        ['#0f0f11', '#1a1a1d', '#ffffff', '#3b82f6', 'rgba(0,0,0,0.95)'],
+        ['#f4f4f5', '#ffffff', '#18181b', '#000000', 'rgba(255,255,255,0.95)'],
+        ['#052e16', '#064e3b', '#ecfccb', '#84cc16', 'rgba(5, 46, 22, 0.95)'],
+        ['#fff1f2', '#ffe4e6', '#881337', '#fb7185', 'rgba(255, 241, 242, 0.95)'],
+        ['#0f172a', '#1e293b', '#e2e8f0', '#38bdf8', 'rgba(15, 23, 42, 0.95)']
+    ];
+
+    /* --- 2. DOM ELEMENTS --- */
+    const root = document.documentElement;
+    const gallery = document.getElementById('gallery');
+    const lightbox = document.getElementById('lightbox');
+    const lightboxImg = document.getElementById('lightbox-img');
+    const setupOverlay = document.getElementById('setupOverlay');
+    const fileInput = document.getElementById('fileInput');
+    const generateBtn = document.getElementById('generateBtn');
+    
+    // Settings
+    const toggleSettings = document.getElementById('toggleSettings');
+    const settingsPanel = document.getElementById('settingsPanel');
+    const gapRange = document.getElementById('gapRange');
+    const radRange = document.getElementById('radRange');
+    const gapVal = document.getElementById('gapVal');
+    const radVal = document.getElementById('radVal');
+    
+    /* --- 3. LOGIC --- */
+
+    generateBtn.addEventListener('click', () => {
+        const raw = fileInput.value;
+        if(!raw.trim()) return alert("Enter filenames first.");
+        
+        images = raw.split(/[\n,]+/).map(s=>s.trim()).filter(s=>s.length > 0);
+        
+        gallery.innerHTML = '';
+        
+        // --- HYBRID LAYOUT LOGIC ---
+        // Threshold: If <= 8 images, use Centered Flex. If > 8, use Masonry.
+        const threshold = 8;
+        
+        gallery.classList.remove('mode-masonry', 'mode-centered');
+        
+        if (images.length <= threshold) {
+            gallery.classList.add('mode-centered');
+        } else {
+            gallery.classList.add('mode-masonry');
+        }
+
+        images.forEach((src, i) => {
+            const div = document.createElement('div');
+            div.className = 'gallery-item';
+            div.innerHTML = `<img src="${src}" data-index="${i}" onerror="this.parentElement.style.display='none'">`;
+            gallery.appendChild(div);
+        });
+
+        setupOverlay.style.opacity = '0';
+        setTimeout(() => {
+            setupOverlay.style.display = 'none';
+            toggleSettings.style.display = 'block';
+        }, 500);
+    });
+
+    /* --- Lightbox --- */
+    const openLightbox = (i) => {
+        currentIndex = parseInt(i);
+        lightboxImg.src = images[currentIndex];
+        lightbox.classList.add('active');
+        document.body.style.overflow = 'hidden';
+    };
+    const closeLightbox = () => {
+        lightbox.classList.remove('active');
+        document.body.style.overflow = '';
+        setTimeout(() => lightboxImg.src = '', 200);
+    }
+    const changeImage = (dir) => {
+        currentIndex = (currentIndex + dir + images.length) % images.length;
+        lightboxImg.src = images[currentIndex];
+    }
+
+    /* --- Settings --- */
+    let settingsOpen = false;
+    toggleSettings.addEventListener('click', (e) => {
+        e.stopPropagation();
+        settingsOpen = !settingsOpen;
+        settingsPanel.style.display = settingsOpen ? 'block' : 'none';
+    });
+
+    const updateStyle = (gap, rad) => {
+        root.style.setProperty('--gap', gap + 'px');
+        root.style.setProperty('--radius', rad + 'px');
+        gapVal.textContent = gap;
+        radVal.textContent = rad;
+    };
+
+    const applyTheme = (idx) => {
+        const t = themes[idx];
+        root.style.setProperty('--bg-color', t[0]);
+        root.style.setProperty('--item-bg', t[1]);
+        root.style.setProperty('--text-color', t[2]);
+        root.style.setProperty('--accent-color', t[3]);
+        root.style.setProperty('--overlay-color', t[4]);
+        if(idx === 1 || idx === 3) { 
+            document.querySelector('.settings-panel').style.color = 'white'; 
+        }
+    };
+
+    gapRange.addEventListener('input', (e) => updateStyle(e.target.value, radRange.value));
+    radRange.addEventListener('input', (e) => updateStyle(gapRange.value, e.target.value));
+
+    document.getElementById('cycleThemeBtn').addEventListener('click', () => {
+        themeIndex = (themeIndex + 1) % themes.length;
+        applyTheme(themeIndex);
+    });
+
+    document.getElementById('randomizeBtn').addEventListener('click', () => {
+        const rGap = Math.floor(Math.random() * 61);
+        const rRad = Math.floor(Math.random() * 41);
+        themeIndex = Math.floor(Math.random() * themes.length);
+        updateStyle(rGap, rRad);
+        applyTheme(themeIndex);
+        gapRange.value = rGap;
+        radRange.value = rRad;
+    });
+
+    /* --- Listeners --- */
+    gallery.addEventListener('click', e => {
+        if(e.target.tagName === 'IMG') openLightbox(e.target.dataset.index);
+    });
+    lightbox.addEventListener('click', e => {
+        if(e.target === lightbox) closeLightbox();
+    });
+    document.querySelector('.close-btn').addEventListener('click', closeLightbox);
+    document.getElementById('prevZone').addEventListener('click', () => changeImage(-1));
+    document.getElementById('nextZone').addEventListener('click', () => changeImage(1));
+    document.addEventListener('keydown', e => {
+        if(!lightbox.classList.contains('active')) return;
+        if(e.key === 'Escape') closeLightbox();
+        if(e.key === 'ArrowRight') changeImage(1);
+        if(e.key === 'ArrowLeft') changeImage(-1);
+    });
+    document.addEventListener('click', (e) => {
+        if(settingsOpen && !settingsPanel.contains(e.target) && e.target !== toggleSettings) {
+            settingsOpen = false;
+            settingsPanel.style.display = 'none';
+        }
+    });
+
+    // Dummy Data for Preview
+    for(let i=0; i<3; i++) { // Default to small number to show off centering logic first!
+        let h = Math.floor(Math.random() * 300) + 300;
+        let d = document.createElement('div'); d.className='gallery-item';
+        // Note: For dummy data we don't apply the class logic automatically, 
+        // the user sees the centering effect immediately on Generate
+        d.innerHTML=`<img src="https://picsum.photos/400/${h}?random=${i}" style="opacity:0.3">`;
+        gallery.appendChild(d);
+    }
+    // Manually force centered mode for the dummy preview
+    gallery.classList.add('mode-centered'); 
+</script>
 </body>
 </html>
